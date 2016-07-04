@@ -4,10 +4,12 @@ LONDELEC CELLRTU
 Files of the RTU iMX287 port
 --------------------------------
 
-arch/arm/cpu/arm926ejs/mxs/	- The CPU support code for the Freescale i.MX28
-arch/arm/include/asm/arch-mxs/	- Header files for the Freescale i.MX28
-board/londelec/rtuimx287/	- M28EVK board specific files
-include/configs/rtuimx287.h	- M28EVK configuration file
+arch/arm/cpu/arm926ejs/mxs/		- The CPU support code for the Freescale i.MX28
+arch/arm/include/asm/arch-mxs/		- Header files for the Freescale i.MX28
+board/londelec/rtuimx287/		- M28EVK board specific files
+include/configs/rtuimx287.h		- M28EVK configuration file
+
+board/londelec/rtuimx287/leiodc.env	- Environment source, use tools/mkenvimage to build leubootenv.bin e.g. tools/mkenvimage -s 16384 -o leubootenv.bin board/londelec/rtuimx287/leiodc.env
 
 Follow the instructions from doc/README.mxs to generate a bootable SD card or to
 boot from NAND flash.
