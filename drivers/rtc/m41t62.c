@@ -58,8 +58,9 @@ int rtc_get(struct rtc_time *tm)
 
 	i2c_read(CONFIG_SYS_I2C_RTC_ADDR, 0, 1, buf, M41T62_DATETIME_REG_SIZE);
 
-	debug("%s: raw read data - sec=%02x, min=%02x, hr=%02x, "
-	      "mday=%02x, mon=%02x, year=%02x, wday=%02x, y2k=%02x\n",
+	//printf("%s: raw read data - msec=0x%02x, sec=0x%02x, min=0x%02x, "
+	debug("%s: raw read data - msec=0x%02x, sec=0x%02x, min=0x%02x, "
+	      "hours=0x%02x, wday=0x%02x, mday=0x%02x, mon=0x%02x, year=0x%02x\n",
 	      __FUNCTION__,
 	      buf[0], buf[1], buf[2], buf[3],
 	      buf[4], buf[5], buf[6], buf[7]);

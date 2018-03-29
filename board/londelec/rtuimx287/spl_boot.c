@@ -2,11 +2,14 @@
  ============================================================================
  Name        : spl_boot.c
  Author      : AK
- Version     : V1.00
+ Version     : V1.01
  Copyright   : Property of Londelec UK Ltd
  Description : MX287 IO MUX initialization
 
-  Change log  :
+  Change log :
+
+  *********V1.01 08/02/2018**************
+  I2C pins enabled
 
   *********V1.00 04/12/2014**************
   Initial revision
@@ -216,8 +219,8 @@ const iomux_cfg_t iomux_setup[] = {
 //#endif
 
 	/* I2C */
-	//MX28_PAD_I2C0_SCL__I2C0_SCL,
-	//MX28_PAD_I2C0_SDA__I2C0_SDA,
+	MX28_PAD_I2C0_SCL__I2C0_SCL,
+	MX28_PAD_I2C0_SDA__I2C0_SDA,
 
 	/* EMI */
 	MX28_PAD_EMI_D00__EMI_DATA0 | MUX_CONFIG_EMI,

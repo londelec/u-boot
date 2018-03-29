@@ -2,11 +2,14 @@
  ============================================================================
  Name        : rtuimx287.h
  Author      : AK
- Version     : V1.00
+ Version     : V1.01
  Copyright   : Property of Londelec UK Ltd
  Description : Build definitions
 
-  Change log  :
+  Change log :
+
+  *********V1.01 07/02/2018**************
+  External RTC used
 
   *********V1.00 04/12/2014**************
   Initial revision
@@ -121,7 +124,7 @@
 /* RTC */
 #ifdef CONFIG_CMD_DATE
 /* Use the internal RTC in the MXS chip */
-#define CONFIG_RTC_INTERNAL
+/*#define CONFIG_RTC_INTERNAL */
 #ifdef CONFIG_RTC_INTERNAL
 #define CONFIG_RTC_MXS
 #else
