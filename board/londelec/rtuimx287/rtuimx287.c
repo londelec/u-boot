@@ -2,12 +2,15 @@
  ============================================================================
  Name        : rtuimx287.c
  Author      : AK
- Version     : V1.00
+ Version     : V1.01
  Copyright   : Property of Londelec UK Ltd
  Description : Board specific initialization functions
 
-  Change log  :
+  Change log :
 
+  *********V1.01 23/01/2021**************
+  'ethaddr=' and 'eth1addr=' no longer have to be at a specific location in NAND flash
+  
   *********V1.00 04/12/2014**************
   Initial revision
 
@@ -195,26 +198,46 @@ int board_eth_init(bd_t *bis)
 
 	// Get hardware address from onboard NAND and set in environment
 	// Addresses will be loaded automatically by function eth_write_hwaddr() in net/eth.c
-	// [05/03/2015]
+	// [23/01/2021]
 	u_char buffer[256];
 	loff_t offset = 0x800000;
 	size_t rwsize = 128;
 	size_t maxsize = 256;
-	const char eth0varname[] = "ethaddr";
-	const char eth1varname[] = "eth1addr";
+	char eth0varname[] = "ethaddr=";
+	char eth1varname[] = "eth1addr=";
+	char *eth0varvalue = NULL;
+	char *eth1varvalue = NULL;
+
 	ret = nand_read_skip_bad(&nand_info[0], offset, &rwsize, NULL, maxsize, (u_char *) &buffer);
 
 	//printf("DEBUG FLASH = %u\n", rwsize);
-	//size_t i;
-	//for (i = 0; i < rwsize; i++) {
-	//	printf("%02x ", buffer[i]);
-	//}
-	//printf(" \n");
-	char *eth0varvalue = (char *) &buffer[0x27];
-	char *eth1varvalue = (char *) &buffer[0x0D];
+	size_t i;
+	for (i = 0; i < (rwsize - 25); i++) {
+		//printf("%02x ", buffer[i]);
+		if (
+			(!eth0varvalue) &&
+			!(memcmp(&buffer[i], eth0varname, sizeof(eth0varname) - 1))) {
+			eth0varvalue = (char *) &buffer[i + sizeof(eth0varname) - 1];
+		}
+		if (
+			(!eth1varvalue) &&
+			!(memcmp(&buffer[i], eth1varname, sizeof(eth1varname) - 1))) {
+			eth1varvalue = (char *) &buffer[i + sizeof(eth1varname) - 1];
+		}
+	}
+
+	eth0varname[sizeof(eth0varname) - 2] = 0;
+	eth1varname[sizeof(eth1varname) - 2] = 0;
+	if (eth0varvalue)
+		setenv(eth0varname, eth0varvalue);
+	else
+		eth0varvalue = "?";
+	if (eth1varvalue)
+		setenv(eth1varname, eth1varvalue);
+	else
+		eth1varvalue = "?";
+
 	printf("\nFEC0 HW: %s\nFEC1 HW: %s\n", eth0varvalue, eth1varvalue);
-	setenv(eth0varname, eth0varvalue);
-	setenv(eth1varname, eth1varvalue);
 	return ret;
 }
 
