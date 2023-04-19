@@ -6,7 +6,7 @@
 #
 
 ifndef	CONFIG_SPL_BUILD
-obj-y	:= rtuimx287.o
+obj-y	:= lertuimx28.o
 else
 obj-y	:= spl_boot.o
 endif

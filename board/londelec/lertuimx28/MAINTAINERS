@@ -1,0 +1,6 @@
+LERTUIMX28 BOARD
+M:	Londelec UK Ltd <tech@londelec.com>
+S:	Maintained
+F:	board/londelec/lertuimx28/
+F:	include/configs/mx28_lertu.h
+F:	configs/mx28_lertu_defconfig

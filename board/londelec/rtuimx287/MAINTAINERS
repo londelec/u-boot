@@ -1,6 +1,0 @@
-M28EVK BOARD
-M:	Londelec UK Ltd <tech@londelec.com>
-S:	Maintained
-F:	board/londelec/rtuimx287/
-F:	include/configs/rtuimx287.h
-F:	configs/rtuimx287_defconfig

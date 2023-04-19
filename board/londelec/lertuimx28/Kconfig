@@ -1,10 +1,10 @@
-if TARGET_RTUIMX287
+if TARGET_LERTUIMX28
 
 config SYS_CPU
 	default "arm926ejs"
 
 config SYS_BOARD
-	default "rtuimx287"
+	default "lertuimx28"
 
 config SYS_VENDOR
 	default "londelec"
@@ -13,6 +13,6 @@ config SYS_SOC
 	default "mxs"
 
 config SYS_CONFIG_NAME
-	default "rtuimx287"
+	default "mx28_lertu"
 
 endif
