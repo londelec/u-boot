@@ -752,7 +752,9 @@ static void mxs_batt_boot(void)
 		POWER_5VCTRL_CHARGE_4P2_ILIMIT_MASK,
 		0x8 << POWER_5VCTRL_CHARGE_4P2_ILIMIT_OFFSET);
 
+#ifndef CFG_SPL_MXS_NO_VDD5V_SOURCE
 	mxs_power_enable_4p2();
+#endif
 }
 
 /**
@@ -1137,8 +1139,11 @@ static void mxs_power_set_vddx(const struct mxs_vddx_cfg *cfg,
 	cur_target += cfg->lowest_mV;
 
 	adjust_up = new_target > cur_target;
+
+#ifndef CFG_SPL_MXS_NO_VDD5V_SOURCE
 	if (cfg->powered_by_linreg)
 		powered_by_linreg = cfg->powered_by_linreg();
+#endif
 
 	if (adjust_up && cfg->bo_irq) {
 		if (powered_by_linreg) {
@@ -1269,7 +1274,9 @@ void mxs_power_init(void)
 		POWER_CTRL_VBUS_VALID_IRQ | POWER_CTRL_BATT_BO_IRQ |
 		POWER_CTRL_DCDC4P2_BO_IRQ, &power_regs->hw_power_ctrl_clr);
 
+#ifndef CFG_SPL_MXS_NO_VDD5V_SOURCE
 	writel(POWER_5VCTRL_PWDN_5VBRNOUT, &power_regs->hw_power_5vctrl_set);
+#endif
 
 	early_delay(1000);
 }
