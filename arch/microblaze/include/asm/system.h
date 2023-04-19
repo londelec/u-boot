@@ -23,6 +23,8 @@
 #endif
 #include <asm/ptrace.h>
 
+#define MMU_SECTION_SIZE	(1 * 1024 * 1024)
+
 #define prepare_to_switch()	do { } while (0)
 
 /*
@@ -131,7 +133,7 @@ extern void *switch_thread (struct thread_struct *last,
   ((__typeof__ (*(ptr)))__xchg ((unsigned long)(with), (ptr), sizeof (*(ptr))))
 #define tas(ptr) (xchg ((ptr), 1))
 
-extern inline unsigned long __xchg (unsigned long with,
+static inline unsigned long __xchg(unsigned long with,
 				    __volatile__ void *ptr, int size)
 {
 	unsigned long tmp, flags;

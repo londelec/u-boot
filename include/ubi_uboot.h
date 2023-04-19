@@ -32,28 +32,7 @@
 #include <onenand_uboot.h>
 #endif
 
-#include <asm/errno.h>
-
-/* configurable */
-#if !defined(CONFIG_MTD_UBI_WL_THRESHOLD)
-#define CONFIG_MTD_UBI_WL_THRESHOLD	4096
-#endif
-#define CONFIG_MTD_UBI_BEB_RESERVE	1
-
-/* debug options (Linux: drivers/mtd/ubi/Kconfig.debug) */
-#undef CONFIG_MTD_UBI_DEBUG
-#undef CONFIG_MTD_UBI_DEBUG_PARANOID
-#undef CONFIG_MTD_UBI_DEBUG_MSG
-#undef CONFIG_MTD_UBI_DEBUG_MSG_EBA
-#undef CONFIG_MTD_UBI_DEBUG_MSG_WL
-#undef CONFIG_MTD_UBI_DEBUG_MSG_IO
-#undef CONFIG_MTD_UBI_DEBUG_MSG_BLD
-
-#undef CONFIG_MTD_UBI_BLOCK
-
-#if !defined(CONFIG_MTD_UBI_BEB_LIMIT)
-#define CONFIG_MTD_UBI_BEB_LIMIT	20
-#endif
+#include <linux/errno.h>
 
 /* build.c */
 #define get_device(...)
@@ -74,5 +53,7 @@ extern int ubi_volume_write(char *volume, void *buf, size_t size);
 extern int ubi_volume_read(char *volume, char *buf, size_t size);
 
 extern struct ubi_device *ubi_devices[];
+int cmd_ubifs_mount(char *vol_name);
+int cmd_ubifs_umount(void);
 
 #endif

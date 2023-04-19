@@ -1,12 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
-  A version of malloc/free/realloc written by Doug Lea and released to the
-  public domain.  Send questions/comments/complaints/performance data
-  to dl@cs.oswego.edu
+  This code is based on a version of malloc/free/realloc written by Doug Lea and
+  released to the public domain. Send questions/comments/complaints/performance
+  data to dl@cs.oswego.edu
 
 * VERSION 2.6.6  Sun Mar  5 19:10:03 2000  Doug Lea  (dl at gee)
 
    Note: There may be an updated version of this malloc obtainable at
-	   ftp://g.oswego.edu/pub/misc/malloc.c
+	   http://g.oswego.edu/pub/misc/malloc.c
 	 Check before installing!
 
 * Why use this malloc?
@@ -361,8 +362,11 @@ extern "C" {
 #if (__STD_C || defined(HAVE_MEMCPY))
 
 #if __STD_C
+/* U-Boot defines memset() and memcpy in /include/linux/string.h
 void* memset(void*, int, size_t);
 void* memcpy(void*, const void*, size_t);
+*/
+#include <linux/string.h>
 #else
 #ifdef WIN32
 /* On Win32 platforms, 'memset()' and 'memcpy()' are already declared in */
@@ -788,8 +792,13 @@ struct mallinfo {
 
 */
 
-/* #define USE_DL_PREFIX */
-
+/*
+ * Rename the U-Boot alloc functions so that sandbox can still use the system
+ * ones
+ */
+#ifdef CONFIG_SANDBOX
+#define USE_DL_PREFIX
+#endif
 
 /*
 
@@ -872,33 +881,83 @@ extern Void_t*     sbrk();
 
 #else
 
-#ifdef USE_DL_PREFIX
-#define cALLOc		dlcalloc
-#define fREe		dlfree
-#define mALLOc		dlmalloc
-#define mEMALIGn	dlmemalign
-#define rEALLOc		dlrealloc
-#define vALLOc		dlvalloc
-#define pvALLOc		dlpvalloc
-#define mALLINFo	dlmallinfo
-#define mALLOPt		dlmallopt
-#else /* USE_DL_PREFIX */
-#define cALLOc		calloc
-#define fREe		free
-#define mALLOc		malloc
-#define mEMALIGn	memalign
-#define rEALLOc		realloc
-#define vALLOc		valloc
-#define pvALLOc		pvalloc
-#define mALLINFo	mallinfo
-#define mALLOPt		mallopt
-#endif /* USE_DL_PREFIX */
+void malloc_simple_info(void);
+
+/**
+ * malloc_enable_testing() - Put malloc() into test mode
+ *
+ * This only works if UNIT_TESTING is enabled
+ *
+ * @max_allocs: return -ENOMEM after max_allocs calls to malloc()
+ */
+void malloc_enable_testing(int max_allocs);
+
+/** malloc_disable_testing() - Put malloc() into normal mode */
+void malloc_disable_testing(void);
+
+#if CONFIG_IS_ENABLED(SYS_MALLOC_SIMPLE)
+#define malloc malloc_simple
+#define realloc realloc_simple
+#define memalign memalign_simple
+#if IS_ENABLED(CONFIG_VALGRIND)
+#define free free_simple
+#else
+static inline void free(void *ptr) {}
+#endif
+void *calloc(size_t nmemb, size_t size);
+void *realloc_simple(void *ptr, size_t size);
+#else
+
+# ifdef USE_DL_PREFIX
+# define cALLOc		dlcalloc
+# define fREe		dlfree
+# define mALLOc		dlmalloc
+# define mEMALIGn	dlmemalign
+# define rEALLOc		dlrealloc
+# define vALLOc		dlvalloc
+# define pvALLOc		dlpvalloc
+# define mALLINFo	dlmallinfo
+# define mALLOPt		dlmallopt
+
+/* Ensure that U-Boot actually uses these too */
+#define calloc dlcalloc
+#define free(ptr) dlfree(ptr)
+#define malloc(x) dlmalloc(x)
+#define memalign dlmemalign
+#define realloc dlrealloc
+#define valloc dlvalloc
+#define pvalloc dlpvalloc
+#define mallinfo() dlmallinfo()
+#define mallopt dlmallopt
+#define malloc_trim dlmalloc_trim
+#define malloc_usable_size dlmalloc_usable_size
+#define malloc_stats dlmalloc_stats
+
+# else /* USE_DL_PREFIX */
+# define cALLOc		calloc
+# define fREe		free
+# define mALLOc		malloc
+# define mEMALIGn	memalign
+# define rEALLOc		realloc
+# define vALLOc		valloc
+# define pvALLOc		pvalloc
+# define mALLINFo	mallinfo
+# define mALLOPt		mallopt
+# endif /* USE_DL_PREFIX */
 
 #endif
 
+/* Set up pre-relocation malloc() ready for use */
+int initf_malloc(void);
+
 /* Public routines */
 
-#if __STD_C
+/* Simple versions which can be used when space is tight */
+void *malloc_simple(size_t size);
+void *memalign_simple(size_t alignment, size_t bytes);
+
+#pragma GCC visibility push(hidden)
+# if __STD_C
 
 Void_t* mALLOc(size_t);
 void    fREe(Void_t*);
@@ -913,7 +972,7 @@ size_t  malloc_usable_size(Void_t*);
 void    malloc_stats(void);
 int     mALLOPt(int, int);
 struct mallinfo mALLINFo(void);
-#else
+# else
 Void_t* mALLOc();
 void    fREe();
 Void_t* rEALLOc();
@@ -927,7 +986,9 @@ size_t  malloc_usable_size();
 void    malloc_stats();
 int     mALLOPt();
 struct mallinfo mALLINFo();
+# endif
 #endif
+#pragma GCC visibility pop
 
 /*
  * Begin and End of memory area for malloc(), and current "brk"

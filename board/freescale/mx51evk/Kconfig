@@ -1,8 +1,5 @@
 if TARGET_MX51EVK
 
-config SYS_CPU
-	default "armv7"
-
 config SYS_BOARD
 	default "mx51evk"
 
@@ -14,5 +11,8 @@ config SYS_SOC
 
 config SYS_CONFIG_NAME
 	default "mx51evk"
+
+config IMX_CONFIG
+	default "board/freescale/mx51evk/imximage.cfg"
 
 endif

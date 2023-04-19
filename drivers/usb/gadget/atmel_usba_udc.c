@@ -1,15 +1,15 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Driver for the Atmel USBA high speed USB device controller
  * [Original from Linux kernel: drivers/usb/gadget/atmel_usba_udc.c]
  *
  * Copyright (C) 2005-2013 Atmel Corporation
  *			   Bo Shen <voice.shen@atmel.com>
- *
- * SPDX-License-Identifier:     GPL-2.0+
  */
 
 #include <common.h>
-#include <asm/errno.h>
+#include <linux/bitops.h>
+#include <linux/errno.h>
 #include <asm/gpio.h>
 #include <asm/hardware.h>
 #include <linux/list.h>
@@ -17,7 +17,6 @@
 #include <linux/usb/gadget.h>
 #include <linux/usb/atmel_usba_udc.h>
 #include <malloc.h>
-#include <usb/lin_gadget_compat.h>
 
 #include "atmel_usba_udc.h"
 
@@ -1062,7 +1061,6 @@ static void usba_ep_irq(struct usba_udc *udc, struct usba_ep *ep)
 	if ((epstatus & epctrl) & USBA_RX_BK_RDY) {
 		DBG(DBG_BUS, "%s: RX data ready\n", ep->ep.name);
 		receive_data(ep);
-		usba_ep_writel(ep, CLR_STA, USBA_RX_BK_RDY);
 	}
 }
 
@@ -1200,7 +1198,7 @@ static struct usba_udc controller = {
 	},
 };
 
-int usb_gadget_handle_interrupts(void)
+int usb_gadget_handle_interrupts(int index)
 {
 	struct usba_udc *udc = &controller;
 
@@ -1229,7 +1227,7 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver)
 
 	ret = driver->bind(&udc->gadget);
 	if (ret) {
-		error("driver->bind() returned %d\n", ret);
+		pr_err("driver->bind() returned %d\n", ret);
 		udc->driver = NULL;
 	}
 
@@ -1241,7 +1239,7 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	struct usba_udc *udc = &controller;
 
 	if (!driver || !driver->unbind || !driver->disconnect) {
-		error("bad paramter\n");
+		pr_err("bad paramter\n");
 		return -EINVAL;
 	}
 
@@ -1262,7 +1260,7 @@ static struct usba_ep *usba_udc_pdata(struct usba_platform_data *pdata,
 
 	eps = malloc(sizeof(struct usba_ep) * pdata->num_ep);
 	if (!eps) {
-		error("failed to alloc eps\n");
+		pr_err("failed to alloc eps\n");
 		return NULL;
 	}
 

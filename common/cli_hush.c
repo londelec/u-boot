@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * sh.c -- a prototype Bourne shell grammar parser
  *      Intended to follow the original Thompson and Ritchie
@@ -70,22 +71,20 @@
  *      document how quoting rules not precisely followed for variable assignments
  *      maybe change map[] to use 2-bit entries
  *      (eventually) remove all the printf's
- *
- * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #define __U_BOOT__
 #ifdef __U_BOOT__
+#include <common.h>         /* readline */
+#include <env.h>
 #include <malloc.h>         /* malloc, free, realloc*/
 #include <linux/ctype.h>    /* isalpha, isdigit */
-#include <common.h>        /* readline */
+#include <console.h>
 #include <bootretry.h>
 #include <cli.h>
 #include <cli_hush.h>
 #include <command.h>        /* find_cmd */
-#ifndef CONFIG_SYS_PROMPT_HUSH_PS2
-#define CONFIG_SYS_PROMPT_HUSH_PS2	"> "
-#endif
+#include <asm/global_data.h>
 #endif
 #ifndef __U_BOOT__
 #include <ctype.h>     /* isalpha, isdigit */
@@ -113,7 +112,6 @@
 #define applet_name "hush"
 #include "standalone.h"
 #define hush_main main
-#undef CONFIG_FEATURE_SH_FANCY_PROMPT
 #define BB_BANNER
 #endif
 #endif
@@ -559,7 +557,7 @@ static int builtin_cd(struct child_prog *child)
 {
 	char *newdir;
 	if (child->argv[1] == NULL)
-		newdir = getenv("HOME");
+		newdir = env_get("HOME");
 	else
 		newdir = child->argv[1];
 	if (chdir(newdir)) {
@@ -947,7 +945,7 @@ static inline void cmdedit_set_initial_prompt(void)
 #ifndef CONFIG_FEATURE_SH_FANCY_PROMPT
 	PS1 = NULL;
 #else
-	PS1 = getenv("PS1");
+	PS1 = env_get("PS1");
 	if(PS1==0)
 		PS1 = "\\w \\$ ";
 #endif
@@ -970,6 +968,30 @@ static inline void setup_prompt_string(int promptmode, char **prompt_str)
 	*prompt_str = (promptmode==1)? PS1 : PS2;
 #endif
 	debug_printf("result %s\n",*prompt_str);
+}
+#endif
+
+#ifdef __U_BOOT__
+static int uboot_cli_readline(struct in_str *i)
+{
+	char *prompt;
+	char __maybe_unused *ps_prompt = NULL;
+
+	if (i->promptmode == 1)
+		prompt = CONFIG_SYS_PROMPT;
+	else
+		prompt = CONFIG_SYS_PROMPT_HUSH_PS2;
+
+#ifdef CONFIG_CMDLINE_PS_SUPPORT
+	if (i->promptmode == 1)
+		ps_prompt = env_get("PS1");
+	else
+		ps_prompt = env_get("PS2");
+	if (ps_prompt)
+		prompt = ps_prompt;
+#endif
+
+	return cli_readline(prompt);
 }
 #endif
 
@@ -1002,11 +1024,8 @@ static void get_user_input(struct in_str *i)
 
 	bootretry_reset_cmd_timeout();
 	i->__promptme = 1;
-	if (i->promptmode == 1) {
-		n = cli_readline(CONFIG_SYS_PROMPT);
-	} else {
-		n = cli_readline(CONFIG_SYS_PROMPT_HUSH_PS2);
-	}
+	n = uboot_cli_readline(i);
+
 #ifdef CONFIG_BOOT_RETRY_TIME
 	if (n == -2) {
 	  puts("\nTimeout waiting for command\n");
@@ -1653,7 +1672,7 @@ static int run_pipe_real(struct pipe *pi)
 			return -1;
 		}
 		/* Process the command */
-		return cmd_process(flag, child->argc, child->argv,
+		return cmd_process(flag, child->argc - i, child->argv + i,
 				   &flag_repeat, NULL);
 #endif
 	}
@@ -1827,8 +1846,7 @@ static int run_list_real(struct pipe *pi)
 				continue;
 			} else {
 				/* insert new value from list for variable */
-				if (pi->progs->argv[0])
-					free(pi->progs->argv[0]);
+				free(pi->progs->argv[0]);
 				pi->progs->argv[0] = *list++;
 #ifndef __U_BOOT__
 				pi->progs->glob_result.gl_pathv[0] =
@@ -1883,7 +1901,7 @@ static int run_list_real(struct pipe *pi)
 			last_return_code = -rcode - 2;
 			return -2;	/* exit */
 		}
-		last_return_code=(rcode == 0) ? 0 : 1;
+		last_return_code = rcode;
 #endif
 #ifndef __U_BOOT__
 		pi->num_progs = save_num_progs; /* restore number of programs */
@@ -2149,19 +2167,11 @@ int set_local_var(const char *s, int flg_export)
 
 	name=strdup(s);
 
-#ifdef __U_BOOT__
-	if (getenv(name) != NULL) {
-		printf ("ERROR: "
-				"There is a global environment variable with the same name.\n");
-		free(name);
-		return -1;
-	}
-#endif
 	/* Assume when we enter this function that we are already in
 	 * NAME=VALUE format.  So the first order of business is to
 	 * split 's' on the '=' into 'name' and 'value' */
 	value = strchr(name, '=');
-	if (value == NULL && ++value == NULL) {
+	if (value == NULL || *(value + 1) == 0) {
 		free(name);
 		return -1;
 	}
@@ -2243,7 +2253,7 @@ void unset_local_var(const char *name)
 			} else {
 #ifndef __U_BOOT__
 				if(cur->flg_export)
-					unsetenv(cur->name);
+					unenv_set(cur->name);
 #endif
 				free(cur->name);
 				free(cur->value);
@@ -2470,11 +2480,16 @@ static int done_word(o_string *dest, struct p_context *ctx)
 		}
 		argc = ++child->argc;
 		child->argv = realloc(child->argv, (argc+1)*sizeof(*child->argv));
-		if (child->argv == NULL) return 1;
+		if (child->argv == NULL) {
+			free(str);
+			return 1;
+		}
 		child->argv_nonnull = realloc(child->argv_nonnull,
 					(argc+1)*sizeof(*child->argv_nonnull));
-		if (child->argv_nonnull == NULL)
+		if (child->argv_nonnull == NULL) {
+			free(str);
 			return 1;
+		}
 		child->argv[argc-1]=str;
 		child->argv_nonnull[argc-1] = dest->nonnull;
 		child->argv[argc]=NULL;
@@ -2766,7 +2781,7 @@ static char *lookup_param(char *src)
 		}
 	}
 
-	p = getenv(src);
+	p = env_get(src);
 	if (!p)
 		p = get_local_var(src);
 
@@ -3130,7 +3145,7 @@ static void mapset(const unsigned char *set, int code)
 static void update_ifs_map(void)
 {
 	/* char *ifs and char map[256] are both globals. */
-	ifs = (uchar *)getenv("IFS");
+	ifs = (uchar *)env_get("IFS");
 	if (ifs == NULL) ifs=(uchar *)" \t\n";
 	/* Precompute a list of 'flow through' behavior so it can be treated
 	 * quickly up front.  Computation is necessary because of IFS.
@@ -3162,7 +3177,7 @@ static int parse_stream_outer(struct in_str *inp, int flag)
 	o_string temp=NULL_O_STRING;
 	int rcode;
 #ifdef __U_BOOT__
-	int code = 0;
+	int code = 1;
 #endif
 	do {
 		ctx.type = flag;
@@ -3170,7 +3185,8 @@ static int parse_stream_outer(struct in_str *inp, int flag)
 		update_ifs_map();
 		if (!(flag & FLAG_PARSE_SEMICOLON) || (flag & FLAG_REPARSING)) mapset((uchar *)";$&|", 0);
 		inp->promptmode=1;
-		rcode = parse_stream(&temp, &ctx, inp, '\n');
+		rcode = parse_stream(&temp, &ctx, inp,
+				     flag & FLAG_CONT_ON_NEWLINE ? -1 : '\n');
 #ifdef __U_BOOT__
 		if (rcode == 1) flag_repeat = 0;
 #endif
@@ -3195,7 +3211,15 @@ static int parse_stream_outer(struct in_str *inp, int flag)
 					printf("exit not allowed from main input shell.\n");
 					continue;
 				}
-				break;
+				/*
+				 * DANGER
+				 * Return code -2 is special in this context,
+				 * it indicates exit from inner pipe instead
+				 * of return code itself, the return code is
+				 * stored in 'last_return_code' variable!
+				 * DANGER
+				 */
+				return -2;
 			}
 			if (code == -1)
 			    flag_repeat = 0;
@@ -3232,11 +3256,13 @@ int parse_string_outer(const char *s, int flag)
 #endif	/* __U_BOOT__ */
 {
 	struct in_str input;
+	int rcode;
 #ifdef __U_BOOT__
 	char *p = NULL;
-	int rcode;
-	if ( !s || !*s)
+	if (!s)
 		return 1;
+	if (!*s)
+		return 0;
 	if (!(p = strchr(s, '\n')) || *++p) {
 		p = xmalloc(strlen(s) + 2);
 		strcpy(p, s);
@@ -3244,11 +3270,12 @@ int parse_string_outer(const char *s, int flag)
 		setup_string_in_str(&input, p);
 		rcode = parse_stream_outer(&input, flag);
 		free(p);
-		return rcode;
+		return rcode == -2 ? last_return_code : rcode;
 	} else {
 #endif
 	setup_string_in_str(&input, s);
-	return parse_stream_outer(&input, flag);
+	rcode = parse_stream_outer(&input, flag);
+	return rcode == -2 ? last_return_code : rcode;
 #ifdef __U_BOOT__
 	}
 #endif
@@ -3268,7 +3295,7 @@ int parse_file_outer(void)
 	setup_file_in_str(&input);
 #endif
 	rcode = parse_stream_outer(&input, FLAG_PARSE_SEMICOLON);
-	return rcode;
+	return rcode == -2 ? last_return_code : rcode;
 }
 
 #ifdef __U_BOOT__
@@ -3306,7 +3333,7 @@ static void *xmalloc(size_t size)
 	void *p = NULL;
 
 	if (!(p = malloc(size))) {
-	    printf("ERROR : memory not allocated\n");
+	    printf("ERROR : xmalloc failed\n");
 	    for(;;);
 	}
 	return p;
@@ -3317,7 +3344,7 @@ static void *xrealloc(void *ptr, size_t size)
 	void *p = NULL;
 
 	if (!(p = realloc(ptr, size))) {
-	    printf("ERROR : memory not allocated\n");
+	    printf("ERROR : xrealloc failed\n");
 	    for(;;);
 	}
 	return p;
@@ -3499,9 +3526,9 @@ static char *insert_var_value_sub(char *inp, int tag_subst)
 	char *p, *p1, *res_str = NULL;
 
 	while ((p = strchr(inp, SPECIAL_VAR_SYMBOL))) {
-		/* check the beginning of the string for normal charachters */
+		/* check the beginning of the string for normal characters */
 		if (p != inp) {
-			/* copy any charachters to the result string */
+			/* copy any characters to the result string */
 			len = p - inp;
 			res_str = xrealloc(res_str, (res_str_len + len));
 			strncpy((res_str + res_str_len), inp, len);
@@ -3635,8 +3662,8 @@ static char *make_string(char **inp, int *nonnull)
 }
 
 #ifdef __U_BOOT__
-static int do_showvar(cmd_tbl_t *cmdtp, int flag, int argc,
-		      char * const argv[])
+static int do_showvar(struct cmd_tbl *cmdtp, int flag, int argc,
+		      char *const argv[])
 {
 	int i, k;
 	int rcode = 0;

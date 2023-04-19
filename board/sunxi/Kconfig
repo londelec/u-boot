@@ -1,36 +1,24 @@
-if TARGET_SUN4I
+choice
+	prompt "SPL Image Type"
+	default SPL_IMAGE_TYPE_SUNXI_EGON
 
-config SYS_CONFIG_NAME
-	default "sun4i"
+config SPL_IMAGE_TYPE_SUNXI_EGON
+	bool "eGON (normal)"
+	help
+	  Select this option to embed the SPL binary in an eGON.BT0 image,
+	  which is compatible with the normal boot ROM (NBROM).
 
-endif
+	  This is usually the correct option to choose.
 
-if TARGET_SUN5I
+config SPL_IMAGE_TYPE_SUNXI_TOC0
+	bool "TOC0 (secure)"
+	help
+	  Select this option to embed the SPL binary in a TOC0 image,
+	  which is compatible with the secure boot ROM (SBROM).
 
-config SYS_CONFIG_NAME
-	default "sun5i"
+endchoice
 
-endif
-
-if TARGET_SUN7I
-
-config SYS_CONFIG_NAME
-	default "sun7i"
-
-endif
-
-if TARGET_SUN4I || TARGET_SUN5I || TARGET_SUN7I
-
-config SYS_CPU
-	default "armv7"
-
-config SYS_BOARD
-	default "sunxi"
-
-config SYS_SOC
-	default "sunxi"
-
-config FDTFILE
-	string "Default fdtfile env setting for this board"
-
-endif
+config SPL_IMAGE_TYPE
+	string
+	default "sunxi_egon" if SPL_IMAGE_TYPE_SUNXI_EGON
+	default "sunxi_toc0" if SPL_IMAGE_TYPE_SUNXI_TOC0

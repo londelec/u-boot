@@ -1,11 +1,10 @@
+/* SPDX-License-Identifier: GPL-2.0+ */
 /*
  * Marvell MMC/SD/SDIO driver
  *
  * (C) Copyright 2012
  * Marvell Semiconductor <www.marvell.com>
  * Written-by: Maen Suleiman, Gerald Kerma
- *
- * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #ifndef __MVEBU_MMC_H__
@@ -22,7 +21,7 @@
 
 #define MVEBU_MMC_CLOCKRATE_MAX			50000000
 #define MVEBU_MMC_BASE_DIV_MAX			0x7ff
-#define MVEBU_MMC_BASE_FAST_CLOCK		CONFIG_SYS_TCLK
+#define MVEBU_MMC_BASE_FAST_CLOCK		CFG_SYS_TCLK
 #define MVEBU_MMC_BASE_FAST_CLK_100		100000000
 #define MVEBU_MMC_BASE_FAST_CLK_200		200000000
 
@@ -79,6 +78,7 @@
 #define CMD_INHIBIT				(1 << 0)
 #define CMD_TXACTIVE				(1 << 8)
 #define CMD_RXACTIVE				(1 << 9)
+#define CMD_FIFO_EMPTY				(1 << 13)
 #define CMD_AUTOCMD12ACTIVE			(1 << 14)
 #define CMD_BUS_BUSY				(CMD_AUTOCMD12ACTIVE |	\
 						CMD_RXACTIVE |	\
@@ -222,13 +222,9 @@
 #define MMC_CAP_SDIO_IRQ			(1 << 3)
 /* Talks only SPI protocols */
 #define MMC_CAP_SPI				(1 << 4)
-/* Needs polling for card-detection */
-#define MMC_CAP_NEEDS_POLL			(1 << 5)
 /* Can the host do 8 bit transfers */
 #define MMC_CAP_8_BIT_DATA			(1 << 6)
 
-/* Nonremovable e.g. eMMC */
-#define MMC_CAP_NONREMOVABLE			(1 << 8)
 /* Waits while card is busy */
 #define MMC_CAP_WAIT_WHILE_BUSY			(1 << 9)
 /* Allow erase/trim commands */
@@ -262,17 +258,10 @@
 /* Hardware reset */
 #define MMC_CAP_HW_RESET			(1 << 31)
 
-struct mvebu_mmc_cfg {
-	u32	mvebu_mmc_base;
-	u32	mvebu_mmc_clk;
-	u8	max_bus_width;
+struct mvebu_mmc_plat {
+	void *iobase;
 	struct mmc_config cfg;
+	struct mmc mmc;
 };
-
-/*
- * Functions prototypes
- */
-
-int mvebu_mmc_init(bd_t *bis);
 
 #endif /* __MVEBU_MMC_H__ */

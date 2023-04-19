@@ -86,6 +86,7 @@ struct ci_req {
 	/* Buffer for the current transfer. Either req.buf/len or b_buf/len */
 	uint8_t *hw_buf;
 	uint32_t hw_len;
+	uint32_t dtd_count;
 };
 
 struct ci_ep {
@@ -127,9 +128,9 @@ struct ept_queue_head {
 	unsigned reserved_4;
 };
 
-#define CONFIG_MAX_PKT(n)	((n) << 16)
-#define CONFIG_ZLT		(1 << 29)	/* stop on zero-len xfer */
-#define CONFIG_IOS		(1 << 15)	/* IRQ on setup */
+#define CFG_MAX_PKT(n)	((n) << 16)
+#define CFG_ZLT		(1 << 29)	/* stop on zero-len xfer */
+#define CFG_IOS		(1 << 15)	/* IRQ on setup */
 
 struct ept_queue_item {
 	unsigned next;

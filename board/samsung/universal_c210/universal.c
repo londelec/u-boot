@@ -1,61 +1,51 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  *  Copyright (C) 2010 Samsung Electronics
  *  Minkyu Kang <mk7.kang@samsung.com>
  *  Kyungmin Park <kyungmin.park@samsung.com>
- *
- * SPDX-License-Identifier:	GPL-2.0+
  */
 
 #include <common.h>
+#include <env.h>
+#include <log.h>
 #include <spi.h>
-#include <lcd.h>
+#include <asm/global_data.h>
 #include <asm/io.h>
 #include <asm/gpio.h>
 #include <asm/arch/adc.h>
-#include <asm/arch/gpio.h>
 #include <asm/arch/pinmux.h>
 #include <asm/arch/watchdog.h>
-#include <ld9040.h>
+#include <linux/delay.h>
 #include <power/pmic.h>
 #include <usb.h>
-#include <usb/s3c_udc.h>
+#include <usb/dwc2_udc.h>
 #include <asm/arch/cpu.h>
 #include <power/max8998_pmic.h>
 #include <libtizen.h>
 #include <samsung/misc.h>
 #include <usb_mass_storage.h>
+#include <asm/mach-types.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
 unsigned int board_rev;
+static int init_pmic_lcd(void);
 
+#ifdef CONFIG_REVISION_TAG
 u32 get_board_rev(void)
 {
 	return board_rev;
+}
+#endif
+
+int exynos_power_init(void)
+{
+	return init_pmic_lcd();
 }
 
 static int get_hwrev(void)
 {
 	return board_rev & 0xFF;
-}
-
-static void init_pmic_lcd(void);
-
-int exynos_power_init(void)
-{
-	int ret;
-
-	/*
-	 * For PMIC the I2C bus is named as I2C5, but it is connected
-	 * to logical I2C adapter 0
-	 */
-	ret = pmic_init(I2C_0);
-	if (ret)
-		return ret;
-
-	init_pmic_lcd();
-
-	return 0;
 }
 
 static unsigned short get_adc_value(int channel)
@@ -85,19 +75,29 @@ static unsigned short get_adc_value(int channel)
 
 static int adc_power_control(int on)
 {
+	struct udevice *dev;
 	int ret;
-	struct pmic *p = pmic_get("MAX8998_PMIC");
-	if (!p)
-		return -ENODEV;
+	u8 reg;
 
-	if (pmic_probe(p))
-		return -1;
+	ret = pmic_get("max8998-pmic", &dev);
+	if (ret) {
+		puts("Failed to get MAX8998!\n");
+		return ret;
+	}
 
-	ret = pmic_set_output(p,
-			      MAX8998_REG_ONOFF1,
-			      MAX8998_LDO4, !!on);
+	reg = pmic_reg_read(dev, MAX8998_REG_ONOFF1);
+	if (on)
+		reg |= MAX8998_LDO4;
+	else
+		reg &= ~MAX8998_LDO4;
 
-	return ret;
+	ret = pmic_reg_write(dev, MAX8998_REG_ONOFF1, reg);
+	if (ret) {
+		puts("MAX8998 LDO setting error\n");
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 static unsigned int get_hw_revision(void)
@@ -145,42 +145,54 @@ static void check_hw_revision(void)
 #ifdef CONFIG_USB_GADGET
 static int s5pc210_phy_control(int on)
 {
-	int ret = 0;
-	struct pmic *p = pmic_get("MAX8998_PMIC");
-	if (!p)
-		return -ENODEV;
+	struct udevice *dev;
+	int ret;
+	u8 reg;
 
-	if (pmic_probe(p))
-		return -1;
+	ret = pmic_get("max8998-pmic", &dev);
+	if (ret) {
+		puts("Failed to get MAX8998!\n");
+		return ret;
+	}
 
 	if (on) {
-		ret |= pmic_set_output(p,
-				       MAX8998_REG_BUCK_ACTIVE_DISCHARGE3,
-				       MAX8998_SAFEOUT1, LDO_ON);
-		ret |= pmic_set_output(p, MAX8998_REG_ONOFF1,
-				      MAX8998_LDO3, LDO_ON);
-		ret |= pmic_set_output(p, MAX8998_REG_ONOFF2,
-				      MAX8998_LDO8, LDO_ON);
+		reg = pmic_reg_read(dev, MAX8998_REG_BUCK_ACTIVE_DISCHARGE3);
+		reg |= MAX8998_SAFEOUT1;
+		ret |= pmic_reg_write(dev,
+			MAX8998_REG_BUCK_ACTIVE_DISCHARGE3, reg);
+
+		reg = pmic_reg_read(dev, MAX8998_REG_ONOFF1);
+		reg |= MAX8998_LDO3;
+		ret |= pmic_reg_write(dev, MAX8998_REG_ONOFF1, reg);
+
+		reg = pmic_reg_read(dev, MAX8998_REG_ONOFF2);
+		reg |= MAX8998_LDO8;
+		ret |= pmic_reg_write(dev, MAX8998_REG_ONOFF2, reg);
 
 	} else {
-		ret |= pmic_set_output(p, MAX8998_REG_ONOFF2,
-				      MAX8998_LDO8, LDO_OFF);
-		ret |= pmic_set_output(p, MAX8998_REG_ONOFF1,
-				      MAX8998_LDO3, LDO_OFF);
-		ret |= pmic_set_output(p,
-				       MAX8998_REG_BUCK_ACTIVE_DISCHARGE3,
-				       MAX8998_SAFEOUT1, LDO_OFF);
+		reg = pmic_reg_read(dev, MAX8998_REG_ONOFF2);
+		reg &= ~MAX8998_LDO8;
+		ret |= pmic_reg_write(dev, MAX8998_REG_ONOFF2, reg);
+
+		reg = pmic_reg_read(dev, MAX8998_REG_ONOFF1);
+		reg &= ~MAX8998_LDO3;
+		ret |= pmic_reg_write(dev, MAX8998_REG_ONOFF1, reg);
+
+		reg = pmic_reg_read(dev, MAX8998_REG_BUCK_ACTIVE_DISCHARGE3);
+		reg &= ~MAX8998_SAFEOUT1;
+		ret |= pmic_reg_write(dev,
+			MAX8998_REG_BUCK_ACTIVE_DISCHARGE3, reg);
 	}
 
 	if (ret) {
 		puts("MAX8998 LDO setting error!\n");
-		return -1;
+		return -EINVAL;
 	}
 
 	return 0;
 }
 
-struct s3c_plat_otg_data s5pc210_otg_data = {
+struct dwc2_plat_otg_data s5pc210_otg_data = {
 	.phy_control = s5pc210_phy_control,
 	.regs_phy = EXYNOS4_USBPHY_BASE,
 	.regs_otg = EXYNOS4_USBOTG_BASE,
@@ -192,7 +204,7 @@ struct s3c_plat_otg_data s5pc210_otg_data = {
 int board_usb_init(int index, enum usb_init_type init)
 {
 	debug("USB_udc_probe\n");
-	return s3c_udc_probe(&s5pc210_otg_data);
+	return dwc2_udc_probe(&s5pc210_otg_data);
 }
 
 int exynos_early_init_f(void)
@@ -202,73 +214,25 @@ int exynos_early_init_f(void)
 	return 0;
 }
 
-#ifdef CONFIG_SOFT_SPI
-static void soft_spi_init(void)
+static int init_pmic_lcd(void)
 {
-	gpio_direction_output(CONFIG_SOFT_SPI_GPIO_SCLK,
-		CONFIG_SOFT_SPI_MODE & SPI_CPOL);
-	gpio_direction_output(CONFIG_SOFT_SPI_GPIO_MOSI, 1);
-	gpio_direction_input(CONFIG_SOFT_SPI_GPIO_MISO);
-	gpio_direction_output(CONFIG_SOFT_SPI_GPIO_CS,
-		!(CONFIG_SOFT_SPI_MODE & SPI_CS_HIGH));
-}
-
-void spi_cs_activate(struct spi_slave *slave)
-{
-	gpio_set_value(CONFIG_SOFT_SPI_GPIO_CS,
-		!(CONFIG_SOFT_SPI_MODE & SPI_CS_HIGH));
-	SPI_SCL(1);
-	gpio_set_value(CONFIG_SOFT_SPI_GPIO_CS,
-		CONFIG_SOFT_SPI_MODE & SPI_CS_HIGH);
-}
-
-void spi_cs_deactivate(struct spi_slave *slave)
-{
-	gpio_set_value(CONFIG_SOFT_SPI_GPIO_CS,
-		!(CONFIG_SOFT_SPI_MODE & SPI_CS_HIGH));
-}
-
-int  spi_cs_is_valid(unsigned int bus, unsigned int cs)
-{
-	return bus == 0 && cs == 0;
-}
-
-void universal_spi_scl(int bit)
-{
-	gpio_set_value(CONFIG_SOFT_SPI_GPIO_SCLK, bit);
-}
-
-void universal_spi_sda(int bit)
-{
-	gpio_set_value(CONFIG_SOFT_SPI_GPIO_MOSI, bit);
-}
-
-int universal_spi_read(void)
-{
-	return gpio_get_value(CONFIG_SOFT_SPI_GPIO_MISO);
-}
-#endif
-
-static void init_pmic_lcd(void)
-{
+	struct udevice *dev;
 	unsigned char val;
 	int ret = 0;
 
-	struct pmic *p = pmic_get("MAX8998_PMIC");
-
-	if (!p)
-		return;
-
-	if (pmic_probe(p))
-		return;
+	ret = pmic_get("max8998-pmic", &dev);
+	if (ret) {
+		puts("Failed to get MAX8998 for init_pmic_lcd()!\n");
+		return ret;
+	}
 
 	/* LDO7 1.8V */
 	val = 0x02; /* (1800 - 1600) / 100; */
-	ret |= pmic_reg_write(p,  MAX8998_REG_LDO7, val);
+	ret |= pmic_reg_write(dev,  MAX8998_REG_LDO7, val);
 
 	/* LDO17 3.0V */
 	val = 0xe; /* (3000 - 1600) / 100; */
-	ret |= pmic_reg_write(p,  MAX8998_REG_LDO17, val);
+	ret |= pmic_reg_write(dev,  MAX8998_REG_LDO17, val);
 
 	/* Disable unneeded regulators */
 	/*
@@ -277,102 +241,28 @@ static void init_pmic_lcd(void)
 	 * LDO2 ON, LDO3 OFF, LDO4 OFF, LDO5 ON
 	 */
 	val = 0xB9;
-	ret |= pmic_reg_write(p,  MAX8998_REG_ONOFF1, val);
+	ret |= pmic_reg_write(dev,  MAX8998_REG_ONOFF1, val);
 
 	/* ONOFF2
 	 * LDO6 OFF, LDO7 ON, LDO8 OFF, LDO9 ON,
 	 * LDO10 OFF, LDO11 OFF, LDO12 OFF, LDO13 OFF
 	 */
 	val = 0x50;
-	ret |= pmic_reg_write(p,  MAX8998_REG_ONOFF2, val);
+	ret |= pmic_reg_write(dev,  MAX8998_REG_ONOFF2, val);
 
 	/* ONOFF3
 	 * LDO14 OFF, LDO15 OFF, LGO16 OFF, LDO17 OFF
 	 * EPWRHOLD OFF, EBATTMON OFF, ELBCNFG2 OFF, ELBCNFG1 OFF
 	 */
 	val = 0x00;
-	ret |= pmic_reg_write(p,  MAX8998_REG_ONOFF3, val);
+	ret |= pmic_reg_write(dev,  MAX8998_REG_ONOFF3, val);
 
-	if (ret)
+	if (ret) {
 		puts("LCD pmic initialisation error!\n");
-}
-
-void exynos_cfg_lcd_gpio(void)
-{
-	unsigned int i, f3_end = 4;
-
-	for (i = 0; i < 8; i++) {
-		/* set GPF0,1,2[0:7] for RGB Interface and Data lines (32bit) */
-		gpio_cfg_pin(EXYNOS4_GPIO_F00 + i, S5P_GPIO_FUNC(2));
-		gpio_cfg_pin(EXYNOS4_GPIO_F10 + i, S5P_GPIO_FUNC(2));
-		gpio_cfg_pin(EXYNOS4_GPIO_F20 + i, S5P_GPIO_FUNC(2));
-		/* pull-up/down disable */
-		gpio_set_pull(EXYNOS4_GPIO_F00 + i, S5P_GPIO_PULL_NONE);
-		gpio_set_pull(EXYNOS4_GPIO_F10 + i, S5P_GPIO_PULL_NONE);
-		gpio_set_pull(EXYNOS4_GPIO_F20 + i, S5P_GPIO_PULL_NONE);
-
-		/* drive strength to max (24bit) */
-		gpio_set_drv(EXYNOS4_GPIO_F00 + i, S5P_GPIO_DRV_4X);
-		gpio_set_rate(EXYNOS4_GPIO_F00 + i, S5P_GPIO_DRV_SLOW);
-		gpio_set_drv(EXYNOS4_GPIO_F10 + i, S5P_GPIO_DRV_4X);
-		gpio_set_rate(EXYNOS4_GPIO_F10 + i, S5P_GPIO_DRV_SLOW);
-		gpio_set_drv(EXYNOS4_GPIO_F20 + i, S5P_GPIO_DRV_4X);
-		gpio_set_rate(EXYNOS4_GPIO_F00 + i, S5P_GPIO_DRV_SLOW);
+		return -EINVAL;
 	}
 
-	for (i = EXYNOS4_GPIO_F30; i < (EXYNOS4_GPIO_F30 + f3_end); i++) {
-		/* set GPF3[0:3] for RGB Interface and Data lines (32bit) */
-		gpio_cfg_pin(i, S5P_GPIO_FUNC(2));
-		/* pull-up/down disable */
-		gpio_set_pull(i, S5P_GPIO_PULL_NONE);
-		/* drive strength to max (24bit) */
-		gpio_set_drv(i, S5P_GPIO_DRV_4X);
-		gpio_set_rate(i, S5P_GPIO_DRV_SLOW);
-	}
-
-	/* gpio pad configuration for LCD reset. */
-	gpio_cfg_pin(EXYNOS4_GPIO_Y45, S5P_GPIO_OUTPUT);
-
-	spi_init();
-}
-
-int mipi_power(void)
-{
 	return 0;
-}
-
-void exynos_reset_lcd(void)
-{
-	gpio_set_value(EXYNOS4_GPIO_Y45, 1);
-	udelay(10000);
-	gpio_set_value(EXYNOS4_GPIO_Y45, 0);
-	udelay(10000);
-	gpio_set_value(EXYNOS4_GPIO_Y45, 1);
-	udelay(100);
-}
-
-void exynos_lcd_power_on(void)
-{
-	struct pmic *p = pmic_get("MAX8998_PMIC");
-
-	if (!p)
-		return;
-
-	if (pmic_probe(p))
-		return;
-
-	pmic_set_output(p, MAX8998_REG_ONOFF3, MAX8998_LDO17, LDO_ON);
-	pmic_set_output(p, MAX8998_REG_ONOFF2, MAX8998_LDO7, LDO_ON);
-}
-
-void exynos_cfg_ldo(void)
-{
-	ld9040_cfg_ldo();
-}
-
-void exynos_enable_ldo(unsigned int onoff)
-{
-	ld9040_enable_ldo(onoff);
 }
 
 int exynos_init(void)
@@ -387,6 +277,7 @@ int exynos_init(void)
 		 * you should set it HIGH since it removes the inverter
 		 */
 		/* MASSMEMORY_EN: XMDMDATA_6: GPE3[6] */
+		gpio_request(EXYNOS4_GPIO_E36, "ldo_en");
 		gpio_direction_output(EXYNOS4_GPIO_E36, 0);
 		break;
 	default:
@@ -395,28 +286,13 @@ int exynos_init(void)
 		 * But set it as HIGH to ensure
 		 */
 		/* MASSMEMORY_EN: XMDMADDR_3: GPE1[3] */
+		gpio_request(EXYNOS4_GPIO_E13, "massmemory_en");
 		gpio_direction_output(EXYNOS4_GPIO_E13, 1);
 		break;
 	}
 
-#ifdef CONFIG_SOFT_SPI
-	soft_spi_init();
-#endif
 	check_hw_revision();
 	printf("HW Revision:\t0x%x\n", board_rev);
 
 	return 0;
-}
-
-void exynos_lcd_misc_init(vidinfo_t *vid)
-{
-#ifdef CONFIG_TIZEN
-	get_tizen_logo_info(vid);
-#endif
-
-	/* for LD9040. */
-	vid->pclk_name = 1;	/* MPLL */
-	vid->sclk_div = 1;
-
-	setenv("lcdinfo", "lcd=ld9040");
 }
