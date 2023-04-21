@@ -1,30 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
- ============================================================================
- Name        : rtuimx287.c
- Author      : AK
- Version     : V1.01
- Copyright   : Property of Londelec UK Ltd
- Description : Board specific initialization functions
-
-  Change log :
-
-  *********V1.01 23/01/2021**************
-  'ethaddr=' and 'eth1addr=' no longer have to be at a specific location in NAND flash
-  
-  *********V1.00 04/12/2014**************
-  Initial revision
-
- ============================================================================
+ * Londelec RTU i.MX28
+ *
+ * Copyright (C) 2014 Londelec UK Ltd.
  */
 
 #include <common.h>
-#include <asm/gpio.h>
-#include <asm/io.h>
+#include <env.h>
 #include <asm/arch/imx-regs.h>
 #include <asm/arch/iomux-mx28.h>
 #include <asm/arch/clock.h>
 #include <asm/arch/sys_proto.h>
-#include <linux/mii.h>
+#include <linux/delay.h>
+#include <linux/stringify.h>
 #include <miiphy.h>
 #include <netdev.h>
 #include <errno.h>
@@ -33,11 +21,192 @@
 
 DECLARE_GLOBAL_DATA_PTR;
 
+#define MBD2_BOARD_ID_MASK	0x00f00000	/* Pins GPIO_3_20..GPIO_3_23 */
+
+#define MBD2_BOARD_ID_SHIFT	20
+
+#define PHY_OUI_MASK		0xfffffc00
+
+#define MXS_PIN_BIT(pad) (1 <<(((pad) & MXS_PAD_PIN_MASK) >> MXS_PAD_PIN_SHIFT))
+
+
+enum phy_type {
+	PHY_NONE = 0,
+	PHY_SMSC_LAN87X,
+	PHY_DP83640,
+};
+
+enum dp83640_addr {
+	DP83640_PHY0_ADDR = 0x0a,
+	DP83640_PHY1_ADDR = 0x03,
+};
+
+enum board_strap {
+	STRAP_MBD2_V01 = 0,
+	STRAP_MBD2_V02 = 0x01,
+};
+
+static const u32 phy_ouis[] = {
+	[PHY_SMSC_LAN87X] = 0x0007c000,	/* [2] = 0x0007; [3] = 0xc0xx */
+	[PHY_DP83640] = 0x20005c00,		/* [2] = 0x2000; [3] = 0x5cxx */
+};
+
+static const struct {
+	enum board_strap strap;
+	enum phy_type pt;
+	const char *suffix;
+} board_compat[] = {
+	{.strap = STRAP_MBD2_V01, .pt = PHY_SMSC_LAN87X, .suffix = "v01"},
+	{.strap = STRAP_MBD2_V02, .pt = PHY_DP83640, .suffix = "v02"},
+};
+
+#if CONFIG_IS_ENABLED(CMD_NET)
+int board_eth_init(struct bd_info *bis)
+{
+	struct mxs_clkctrl_regs *clkctrl_regs =
+		(struct mxs_clkctrl_regs *)MXS_CLKCTRL_BASE;
+	struct mxs_pinctrl_regs *pinctrl_regs =
+		(struct mxs_pinctrl_regs *)MXS_PINCTRL_BASE;
+	int ret;
+
+	ret = cpu_eth_init(bis);
+	if (ret)
+		return ret;
+
+	/* Disable ENET_CLK_OUT immediately, enabled by cpu_eth_init() */
+	clrsetbits_le32(&clkctrl_regs->hw_clkctrl_enet,
+		CLKCTRL_ENET_TIME_SEL_MASK | CLKCTRL_ENET_CLK_OUT_EN,
+		CLKCTRL_ENET_TIME_SEL_RMII_CLK);
+
+	/*
+	 * Reset PHYs
+	 * gpio_direction_output(MX28_PAD_PWM3__GPIO_3_28, 0);
+	 */
+	writel(MXS_PIN_BIT(MX28_PAD_PWM3__GPIO_3_28), &pinctrl_regs->hw_pinctrl_dout3_clr);
+	writel(MXS_PIN_BIT(MX28_PAD_PWM3__GPIO_3_28), &pinctrl_regs->hw_pinctrl_doe3_set);
+	udelay(10000);
+
+	/*
+	 * gpio_set_value(MX28_PAD_PWM3__GPIO_3_28, 1);
+	 */
+	writel(MXS_PIN_BIT(MX28_PAD_PWM3__GPIO_3_28), &pinctrl_regs->hw_pinctrl_dout3_set);
+	udelay(10000);
+	return ret;
+}
+
+static int dp83640_init_leds(void)
+{
+	int val;
+	u8 i, found = 0;
+	u32 oui;
+	struct mii_dev *bus;
+
+	bus = mdio_get_current_dev();
+	if (!bus || !bus->read || !bus->write)
+		return -1;
+
+	for (i = 0; i < PHY_MAX_ADDR; i++) {
+		val = bus->read(bus, i, MDIO_DEVAD_NONE, MII_PHYSID1);
+		if (val < 0)
+			continue;
+
+		oui = val << 16;
+
+		val = bus->read(bus, i, MDIO_DEVAD_NONE, MII_PHYSID2);
+		if (val < 0)
+			continue;
+
+		oui |= val;
+
+		if ((oui & PHY_OUI_MASK) != phy_ouis[PHY_DP83640])
+			continue;
+
+		switch (i) {
+		case DP83640_PHY1_ADDR:
+		case DP83640_PHY0_ADDR:
+			found++;
+			break;
+
+		default:
+			break;
+		}
+		debug("%s: PHY[%u] disabling LED_SPEED by writing LEDCR[0x18] register.\n", __func__, i);
+
+		if (bus->write(bus, i, MDIO_DEVAD_NONE, 0x18, 0x0800))
+			printf("PHY[%u]: DP83640 LEDCR[0x18] register write failed.\n", i);
+	}
+	return (found == 2) ? 0 : -1;
+}
+
+static enum phy_type phy_get_type(void)
+{
+	struct mii_dev *bus;
+	enum phy_type pt;
+	u8 i;
+	u32 oui = 0UL;
+
+	bus = mdio_get_current_dev();
+	if (bus == NULL) {
+		printf("Error: Can't check PHY type, MDIO bus device is not initialized.\n");
+		return PHY_NONE;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(bus->phymap); i++) {
+		if (!bus->phymap[i])
+			continue;
+
+		debug("%s: PHY[%u] ID=0x%08x\n", __func__, i, bus->phymap[i]->phy_id);
+		oui = bus->phymap[i]->phy_id & PHY_OUI_MASK;
+
+		for (pt = PHY_NONE + 1; pt < ARRAY_SIZE(phy_ouis); pt++) {
+			if (phy_ouis[pt] != oui)
+				continue;
+
+			debug("%s: PHY OID type found=%u\n", __func__, pt);
+			return pt;
+		}
+		printf("PHY[%u]: Unknown chip ID=0x%08x\n", i, bus->phymap[i]->phy_id);
+	}
+
+	if (!oui)
+		printf("MDIO %s: No PHY devices found.\n", bus->name);
+	return PHY_NONE;
+}
+
+static void dp83640_phy0_changeover(void)
+{
+	struct udevice *fec0;
+	struct phy_device *phydev;
+	struct mii_dev *bus;
+
+	fec0 = eth_get_dev_by_name("eth0");
+	if (!fec0)
+		return;
+
+	phydev = mdio_phydev_for_ethname(fec0->name);
+	if (!phydev)
+		return;
+	
+	bus = phydev->bus;
+
+	printf("PHY: %s:%u changed to %s:%u\n",
+			bus->name, phydev->addr,
+			bus->name, DP83640_PHY0_ADDR);
+
+	bus->phymap[phydev->addr] = NULL;
+	bus->phymap[DP83640_PHY0_ADDR] = phydev;
+	phydev->addr = DP83640_PHY0_ADDR;
+}
+#endif	/* CONFIG_CMD_NET */
+
 /*
- * Functions
+ * Called from initcall_run_list() in common/board_f.c
  */
 int board_early_init_f(void)
 {
+	struct mxs_pinctrl_regs *pinctrl_regs =
+		(struct mxs_pinctrl_regs *)MXS_PINCTRL_BASE;
+
 	/* IO0 clock at 480MHz */
 	mxs_set_ioclk(MXC_IOCLK0, 480000);
 	/* IO1 clock at 480MHz */
@@ -45,200 +214,101 @@ int board_early_init_f(void)
 
 	/* SSP0 clock at 96MHz */
 	mxs_set_sspclk(MXC_SSPCLK0, 96000, 0);
+
+#if 0
 	/* SSP2 clock at 160MHz */
 	mxs_set_sspclk(MXC_SSPCLK2, 160000, 0);
-
-#ifdef	CONFIG_CMD_USB
-	//mxs_iomux_setup_pad(MX28_PAD_SSP2_SS1__USB1_OVERCURRENT);
-	//mxs_iomux_setup_pad(MX28_PAD_AUART3_TX__GPIO_3_13 |
-	//		MXS_PAD_12MA | MXS_PAD_3V3 | MXS_PAD_PULLUP);
-	//gpio_direction_output(MX28_PAD_AUART3_TX__GPIO_3_13, 0);
-
-	//mxs_iomux_setup_pad(MX28_PAD_AUART3_RX__GPIO_3_12 |
-	//		MXS_PAD_12MA | MXS_PAD_3V3 | MXS_PAD_PULLUP);
-	//gpio_direction_output(MX28_PAD_AUART3_RX__GPIO_3_12, 0);
 #endif
 
-	gpio_direction_output(MX28_PAD_SSP3_MISO__GPIO_2_26, 1);	/* Set Heartbeat pin to output and value 1 */
-	//gpio_direction_output(MX28_PAD_LCD_D08__GPIO_1_8, 1);
-	//gpio_direction_output(MX28_PAD_LCD_D10__GPIO_1_10, 0);
+	/*
+	 * Make Heartbeat pin output and set value 1
+	 * gpio_direction_output(MX28_PAD_SSP3_MISO__GPIO_2_26, 1);
+	 */
+	writel(MXS_PIN_BIT(MX28_PAD_SSP3_MISO__GPIO_2_26), &pinctrl_regs->hw_pinctrl_dout2_set);
+	writel(MXS_PIN_BIT(MX28_PAD_SSP3_MISO__GPIO_2_26), &pinctrl_regs->hw_pinctrl_doe2_set);
 	return 0;
 }
 
-int board_init(void)
-{
-	/* Adress of boot parameters */
-	gd->bd->bi_boot_params = PHYS_SDRAM_1 + 0x100;
-
-	return 0;
-}
-
+/*
+ * Called from initcall_run_list() in common/board_f.c
+ * Defined in include/initcall.h
+ */
 int dram_init(void)
 {
 	return mxs_dram_init();
 }
 
-#ifdef	CONFIG_CMD_MMC
-static int m28_mmc_wp(int id)
+/*
+ * Called from initcall_run_list() in common/board_r.c
+ */
+int board_init(void)
 {
-	if (id != 0) {
-		printf("MXS MMC: Invalid card selected (card id = %d)\n", id);
-		return 1;
-	}
+	/* Adress of boot parameters */
+	gd->bd->bi_boot_params = PHYS_SDRAM_1 + 0x100;
 
-	//return gpio_get_value(MX28_PAD_AUART2_CTS__GPIO_3_10);
-	return 0;	// Always return the card is not write-protected
-}
-
-/***************************************************************************
-* Return card is always present
-* [02/03/2015]
-***************************************************************************/
-static int m28_mmc_cd(int id) {
-
-	return 1;	// Always return the card is present
-}
-
-
-int board_mmc_init(bd_t *bis)
-{
-	/* Configure WP as input. */
-	//gpio_direction_input(MX28_PAD_AUART2_CTS__GPIO_3_10);
-	/* Turn on the power to the card. */
-	//gpio_direction_output(MX28_PAD_PWM3__GPIO_3_28, 0);
-
-	return mxsmmc_initialize(bis, 0, m28_mmc_wp, m28_mmc_cd);
-}
+#if CONFIG_IS_ENABLED(CMD_NET)
+	board_eth_init(gd->bd);
 #endif
-
-#ifdef	CONFIG_CMD_NET
-
-//#define	MII_OPMODE_STRAP_OVERRIDE	0x16
-//#define	MII_PHY_CTRL1			0x1e
-//#define	MII_PHY_CTRL2			0x1f
-
-int fecmxc_mii_postcall(int phy)
-{
-//#if	defined(CONFIG_DENX_M28_V11) || defined(CONFIG_DENX_M28_V10)
-	/* KZ8031 PHY on old boards. */
-//	const uint32_t freq = 0x0080;
-//#else
-	/* KZ8021 PHY on new boards. */
-//	const uint32_t freq = 0x0000;
-//#endif
-
-	miiphy_write("FEC1", phy, MII_BMCR, 0x9000);
-	//miiphy_write("FEC1", phy, MII_OPMODE_STRAP_OVERRIDE, 0x0202);
-	//if (phy == 3)
-	//	miiphy_write("FEC1", 3, MII_PHY_CTRL2, 0x8100 | freq);
 	return 0;
 }
 
-int board_eth_init(bd_t *bis)
+/*
+ * Called from initcall_run_list() in common/board_r.c
+ */
+int last_stage_init(void)
 {
-	struct mxs_clkctrl_regs *clkctrl_regs =
-		(struct mxs_clkctrl_regs *)MXS_CLKCTRL_BASE;
-	struct eth_device *dev;
-	int ret;
+	u8 i;
+	u32 bval;
+	char *envver;
+	enum phy_type pt = PHY_NONE;
+	struct mxs_pinctrl_regs *pinctrl_regs =
+		(struct mxs_pinctrl_regs *)MXS_PINCTRL_BASE;
 
-	ret = cpu_eth_init(bis);
-	if (ret)
-		return ret;
+	/* debug("%s: GPIO3_IN=0x%08x\n", __func__, readl(0x80018930)); */
 
-	clrsetbits_le32(&clkctrl_regs->hw_clkctrl_enet,
-		CLKCTRL_ENET_TIME_SEL_MASK | CLKCTRL_ENET_CLK_OUT_EN,
-		CLKCTRL_ENET_TIME_SEL_RMII_CLK);
-
-//#if !defined(CONFIG_DENX_M28_V11) && !defined(CONFIG_DENX_M28_V10)
-	/* Reset the new PHY */
-	//gpio_direction_output(MX28_PAD_AUART2_RTS__GPIO_3_11, 0);
-	gpio_direction_output(MX28_PAD_PWM3__GPIO_3_28, 0);		// rtu PHY reset pin
-	udelay(10000);
-	//gpio_set_value(MX28_PAD_AUART2_RTS__GPIO_3_11, 1);
-	gpio_set_value(MX28_PAD_PWM3__GPIO_3_28, 1);			// rtu PHY reset pin
-	udelay(10000);
-//#endif
-
-	ret = fecmxc_initialize_multi(bis, 0, 0, MXS_ENET0_BASE);
-	if (ret) {
-		printf("FEC MXS: Unable to init FEC0\n");
-		return ret;
-	}
-
-	ret = fecmxc_initialize_multi(bis, 1, 3, MXS_ENET1_BASE);
-	if (ret) {
-		printf("FEC MXS: Unable to init FEC1\n");
-		return ret;
-	}
-
-	dev = eth_get_dev_by_name("FEC0");
-	if (!dev) {
-		printf("FEC MXS: Unable to get FEC0 device entry\n");
-		return -EINVAL;
-	}
-
-	ret = fecmxc_register_mii_postcall(dev, fecmxc_mii_postcall);
-	if (ret) {
-		printf("FEC MXS: Unable to register FEC0 mii postcall\n");
-		return ret;
-	}
-
-	dev = eth_get_dev_by_name("FEC1");
-	if (!dev) {
-		printf("FEC MXS: Unable to get FEC1 device entry\n");
-		return -EINVAL;
-	}
-
-	ret = fecmxc_register_mii_postcall(dev, fecmxc_mii_postcall);
-	if (ret) {
-		printf("FEC MXS: Unable to register FEC1 mii postcall\n");
-		return ret;
-	}
-
-
-	// Get hardware address from onboard NAND and set in environment
-	// Addresses will be loaded automatically by function eth_write_hwaddr() in net/eth.c
-	// [23/01/2021]
-	u_char buffer[256];
-	loff_t offset = 0x800000;
-	size_t rwsize = 128;
-	size_t maxsize = 256;
-	char eth0varname[] = "ethaddr=";
-	char eth1varname[] = "eth1addr=";
-	char *eth0varvalue = NULL;
-	char *eth1varvalue = NULL;
-
-	ret = nand_read_skip_bad(&nand_info[0], offset, &rwsize, NULL, maxsize, (u_char *) &buffer);
-
-	//printf("DEBUG FLASH = %u\n", rwsize);
-	size_t i;
-	for (i = 0; i < (rwsize - 25); i++) {
-		//printf("%02x ", buffer[i]);
-		if (
-			(!eth0varvalue) &&
-			!(memcmp(&buffer[i], eth0varname, sizeof(eth0varname) - 1))) {
-			eth0varvalue = (char *) &buffer[i + sizeof(eth0varname) - 1];
-		}
-		if (
-			(!eth1varvalue) &&
-			!(memcmp(&buffer[i], eth1varname, sizeof(eth1varname) - 1))) {
-			eth1varvalue = (char *) &buffer[i + sizeof(eth1varname) - 1];
-		}
-	}
-
-	eth0varname[sizeof(eth0varname) - 2] = 0;
-	eth1varname[sizeof(eth1varname) - 2] = 0;
-	if (eth0varvalue)
-		setenv(eth0varname, eth0varvalue);
-	else
-		eth0varvalue = "?";
-	if (eth1varvalue)
-		setenv(eth1varname, eth1varvalue);
-	else
-		eth1varvalue = "?";
-
-	printf("\nFEC0 HW: %s\nFEC1 HW: %s\n", eth0varvalue, eth1varvalue);
-	return ret;
-}
-
+#if CONFIG_IS_ENABLED(CMD_NET)
+	pt = phy_get_type();
 #endif
+
+	bval = readl(&pinctrl_regs->hw_pinctrl_din3);
+	bval = (bval & MBD2_BOARD_ID_MASK) >> MBD2_BOARD_ID_SHIFT;
+
+	for (i = 0; i < ARRAY_SIZE(board_compat); i++) {
+		if (board_compat[i].strap == bval) {
+			printf("Board: D2 version: %s\n", board_compat[i].suffix);
+
+			if ((pt != PHY_NONE) && (board_compat[i].pt != pt))
+				printf("Warning: PHY chip doesn't match board version.\n");
+
+			/* 
+			 * Autoboot will fail to load the *.dtb file if this variable is not set.
+			 * Suffix is added to the *.dtb file name e.g. imx28-lertu-v01.dtb
+			 */
+			env_set("boardversion", board_compat[i].suffix);
+			break;
+		}
+	}
+
+	if (i == ARRAY_SIZE(board_compat))
+		printf("Error: Unknown D2 board version, need to upgrade U-Boot. Strap value 0x%02x\n", bval);
+
+#if CONFIG_IS_ENABLED(CMD_NET)
+	if (pt == PHY_DP83640) {
+		if (!dp83640_init_leds()) {
+			if (bval == STRAP_MBD2_V02)
+				dp83640_phy0_changeover();
+		}
+	}
+#endif
+
+	if (!(gd->flags & GD_FLG_ENV_DEFAULT)) {
+		envver = env_get("leuenvver");
+		/*
+		 * Reset to Default environment if leuenvver variable is not found.
+		 * It may be foreign environment.
+		 */
+		if (envver == NULL)
+			env_set_default("leuenvver missing", 0);
+	}
+	return 0;
+}
