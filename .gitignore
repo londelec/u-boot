@@ -47,6 +47,7 @@ fit-dtb.blob*
 /u-boot*
 /boards.cfg
 /*.log
+/le-uboot*
 
 #
 # git files that we don't want to ignore even it they are dot-files
