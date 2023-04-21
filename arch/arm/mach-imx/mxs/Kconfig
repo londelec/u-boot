@@ -46,6 +46,9 @@ config TARGET_MX28EVK
 config TARGET_XEA
 	bool "Support XEA"
 
+config TARGET_LERTUIMX28
+	bool "Support Londelec RTU"
+
 endchoice
 
 config SYS_SOC
@@ -53,5 +56,6 @@ config SYS_SOC
 
 source "board/freescale/mx28evk/Kconfig"
 source "board/liebherr/xea/Kconfig"
+source "board/londelec/lertuimx28/Kconfig"
 
 endif

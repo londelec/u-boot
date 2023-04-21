@@ -1,15 +1,90 @@
-LONDELEC CELLRTU
-================
+LONDELEC RTU
+============
 
-Files of the RTU iMX287 port
---------------------------------
+Files of the lertu i.MX28 port
+------------------------------
 
 arch/arm/cpu/arm926ejs/mxs/		- The CPU support code for the Freescale i.MX28
 arch/arm/include/asm/arch-mxs/		- Header files for the Freescale i.MX28
-board/londelec/rtuimx287/		- LERTUIMX28 board specific files
-include/configs/rtuimx287.h		- LERTUIMX28 configuration file
+board/londelec/lertuimx28/		- RTU board specific files
+include/configs/mx28_lertu.h		- RTU board header file
+configs/mx28_lertu_defconfig		- Default configuration file
 
-board/londelec/rtuimx287/leiodc.env	- Environment source, use tools/mkenvimage to build leubootenv.bin e.g. tools/mkenvimage -s 16384 -o leubootenv.bin board/londelec/rtuimx287/leiodc.env
 
-Follow the instructions from doc/README.mxs to generate a bootable SD card or to
-boot from NAND flash.
+Building SPL/U-Boot
+-------------------
+
+Setup environment, configure and build by:
+
+	$ make mx28_lertu_config
+	$ make u-boot.sb
+
+This produces "u-boot.sb" file. The file needs to be augmented with a
+proper header to allow successful boot from SD or NAND.
+
+	$ ./tools/mxsboot sd u-boot.sb le-uboot-img.sd
+	$ ./tools/mxsboot nand u-boot.sb le-uboot-img.nand
+
+This produces "le-uboot-img.sd" and "le-uboot-img.nand" files that can be used
+to boot from SD card or NAND respectively.
+
+Installation of U-Boot to SD card
+---------------------------------
+
+The SD card used to boot U-Boot must contain a DOS partition table, which in
+turn carries a partition of special type and which contains a special header.
+This special partition (of type 0x53 "OnTrack DM6 Aux3") must be the first
+one on the SD card followed by a 2nd partition formatted to FAT16 and a 3rd
+partition formatted to ext4. The 2nd (FAT) partition will contain Linux kernel
+image (uImage) and devicetree (*.dtb) files. The 3rd (ext4) partition will
+contain the root file system. Follow the instructions from
+doc/imx/common/mxs.txt to generate a bootable SD card.
+
+The "le-uboot-img.sd" file can be written to the 1st partition
+(type 0x53 "OnTrack DM6 Aux3"), e.g. by:
+
+	$ dd if=le-uboot-img.sd of=/dev/mmcblk0p1
+
+Installation of U-Boot to NAND flash on a i.MX28 board
+------------------------------------------------------
+
+The default U-Boot environment contains command sequences to update
+U-Boot in NAND flash automatically. Copy one of the following files
+to the 2nd (FAT) partition of the SD card:
+
+- le-uboot-img.nand: 	writes both BCB (FCB and DBBT) and U-Boot to NAND
+- le-uboot.sb: 	writes only U-Boot to NAND
+
+NOTE:	No user input is required, NAND is updated automatically if any of
+	these files are found in the SD card. After update the file
+	is automatically deleted to avoid writing the NAND every time
+	U-Boot starts if user forgets to remove it. In order to prevent
+	U-Boot from deleting the file an empty 'guardian' file can
+	be used. Guardian is made by prefixing the name of the file with
+	".keep_" e.g. ".keep_le-uboot-img.nand"
+	U-Boot will not delete the file after update if such guardian is found
+	in the SD card.
+
+Environment Storage
+-------------------
+
+2 sets of environment variables are stored in NAND flash.
+The first environment is located at NAND offset 0x300000 (mtdpart env1) and
+redundant environment is located at NAND offset 0x380000 (mtdpart env2).
+
+After updating U-Boot it is recommended to also update environment variables
+stored in NAND. This can be done with a boot script. Build the boot script:
+
+	$ ./tools/mkimage -A arm -O u-boot -T script -C none -n 'nand_env_setup' -d board/londelec/lertuimx28/setup_env_script.txt le-uboot.scr
+
+Copy the "le-uboot.scr" file to the 2nd (FAT) partition of the SD card.
+U-Boot will run the boot script automatically and update both environment
+locations in NAND flash.
+
+NOTE:	"le-uboot.scr" script will be automatically deleted after environment
+	update. In order to prevent U-Boot from deleting the script an empty
+	'guardian' file can be used. Guardian is made by prefixing the name of
+	the file with ".keep_" e.g. ".keep_le-uboot.scr"
+	U-Boot will not delete the script after update if such guardian is
+	found in the SD card.
+
