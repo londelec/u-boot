@@ -1,0 +1,28 @@
+echo Script: NAND Environment setup script version=10
+if env exists envsize; then;
+else
+	setenv envsize 0x4000;
+fi
+if env exists ethaddr; then;
+else
+	run ethmac_denx_get;
+fi
+if env exists ethaddr; then;
+else
+	echo Script: Loading denxmac.env from mmc ...;
+	if fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} denxmac.env; then
+		env import -c ${loadaddr} ${envsize};
+	fi;
+fi
+if env exists ethaddr; then;
+	echo Script: Copying ethaddr=${ethaddr} and eth1addr=${eth1addr} to NAND (mtdpart=env1);
+	setenv bootcmd 'env default -a; run boot_command';
+	env export -c -s ${envsize} ${loadaddr} ethaddr eth1addr bootcmd leuenvver;
+	nand erase 0x300000 0x80000;
+	nand write ${loadaddr} 0x300000 ${envsize};
+	echo Script: Copying ethaddr=${ethaddr} and eth1addr=${eth1addr} to NAND (mtdpart=env2);
+	nand erase 0x380000 0x80000;
+	nand write ${loadaddr} 0x380000 ${envsize};
+else
+	echo Error: Environment setup failed - ethaddr is not found.;
+fi
